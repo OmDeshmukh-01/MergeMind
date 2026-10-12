@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from app.brain.indexing_pipeline import pipeline, repo_tokens, indexing_jobs
 from app.core.github_services import setup_github_webhook
-from app.ingestion.pdf_processor import process_pdf
+from app.ingestion.pdf_processor import process_pdf, process_markdown
 router = APIRouter()
 
 class IndexRequest(BaseModel):
@@ -37,16 +37,23 @@ async def start_indexing(req: IndexRequest):
 
 @router.post("/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...), project_name: str = Form("MergeMind")):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-    
+    """Accept .pdf or .md documents and ingest them into the knowledge graph."""
+    filename = file.filename or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext not in ("pdf", "md"):
+        raise HTTPException(status_code=400, detail="Only PDF (.pdf) and Markdown (.md) files are supported.")
+
     try:
-        result = await process_pdf(file, project_name)
+        if ext == "pdf":
+            result = await process_pdf(file, project_name)
+        else:
+            result = await process_markdown(file, project_name)
         return result
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @router.get("/status/latest")
 async def get_latest_status(repo_url: str):

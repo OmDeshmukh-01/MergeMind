@@ -16,7 +16,11 @@ class PRState(TypedDict):
     rag_context: str
     graph_context: str
     priority: str
+    priority_reason: str
     has_errors: bool
+    issues: list
+    fix_steps: list
+    fix_code: str
     fix_suggestion: str
     decision: str
     status_message: str
@@ -83,37 +87,87 @@ def analyze_pr(state: PRState) -> PRState:
     llm = ChatOllama(model="qwen2.5:7b", format="json", temperature=0)
     
     prompt = f"""
-    You are an AI Orchestrator analyzing a Pull Request.
+    You are an AI Code Review & Architecture Orchestrator analyzing a Pull Request.
     
-    Commit Messages: {state['commits']}
-    Diff: {state['diff']}
-    Graph Context (Blast Radius): {state['graph_context']}
-    Business/Architecture Context (RAG): {state['rag_context']}
+    Commit Messages:
+    {state.get('commits', '')}
     
-    Determine:
-    1. priority: 'HIGH' or 'LOW'. If it touches many dependents or critical business logic based on the RAG context, it's HIGH. Otherwise LOW.
-    2. has_errors: true or false. Are there any bugs, logical flaws, or anti-patterns in the diff?
-    3. fix_suggestion: If has_errors is true, provide the exact code fix. If false, leave empty.
+    Diff:
+    {state.get('diff', '')}
     
-    Output strictly in JSON format:
+    Graph Context (Blast Radius - dependents in codebase):
+    {state.get('graph_context', '')}
+    
+    Business/Architecture Context (RAG documentation chunks):
+    {state.get('rag_context', '')}
+    
+    Analyze the PR and determine:
+    1. priority: 'HIGH' or 'LOW'. If it touches multiple dependents (high blast radius) or modifies critical business logic from architecture docs, mark HIGH. Otherwise mark LOW.
+    2. priority_reason: 1-2 clear sentences explaining why this PR was classified as HIGH or LOW priority.
+    3. has_errors: true or false. Are there bugs, logical flaws, missing checks, bad patterns, or syntax/runtime issues in the diff?
+    4. issues: A list of concise strings detailing each specific issue/bug found (empty list if no errors).
+    5. fix_steps: A list of clear, actionable step-by-step instructions describing what fixes need to be done (empty list if no errors).
+    6. fix_code: Suggested code snippet showing the exact corrected code (empty string if no errors).
+    7. fix_suggestion: A comprehensive, developer-friendly explanation detailing what fixes need to be done clearly.
+    
+    Output STRICTLY valid JSON with no markdown wrapping:
     {{
         "priority": "HIGH" | "LOW",
+        "priority_reason": "string",
         "has_errors": true | false,
+        "issues": ["string"],
+        "fix_steps": ["string"],
+        "fix_code": "string",
         "fix_suggestion": "string"
     }}
     """
     
     try:
         msg = llm.invoke([SystemMessage(content=prompt)])
-        result = json.loads(msg.content)
+        content = msg.content.strip()
+        # Handle cases where LLM wraps JSON in code block
+        if content.startswith("```"):
+            lines = content.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            content = "\n".join(lines).strip()
+            
+        result = json.loads(content)
         state["priority"] = result.get("priority", "LOW")
-        state["has_errors"] = result.get("has_errors", False)
-        state["fix_suggestion"] = result.get("fix_suggestion", "")
+        state["priority_reason"] = result.get("priority_reason", "")
+        state["has_errors"] = bool(result.get("has_errors", False))
+        
+        issues = result.get("issues", [])
+        if isinstance(issues, str):
+            issues = [issues]
+        state["issues"] = [str(i) for i in issues if str(i).strip()]
+        
+        fix_steps = result.get("fix_steps", [])
+        if isinstance(fix_steps, str):
+            fix_steps = [fix_steps]
+        state["fix_steps"] = [str(s) for s in fix_steps if str(s).strip()]
+        
+        state["fix_code"] = str(result.get("fix_code", ""))
+        state["fix_suggestion"] = str(result.get("fix_suggestion", ""))
+        
+        # Build clean fix_suggestion if missing
+        if not state["fix_suggestion"] and state["fix_steps"]:
+            steps_text = "\n".join([f"{idx+1}. {step}" for idx, step in enumerate(state["fix_steps"])])
+            state["fix_suggestion"] = f"Actionable Fix Steps:\n{steps_text}"
+            if state["fix_code"]:
+                state["fix_suggestion"] += f"\n\nSuggested Code:\n```\n{state['fix_code']}\n```"
+
     except Exception as e:
-        print(f"[Agent] LLM error: {e}")
+        print(f"[Agent] LLM parsing error: {e}")
         state["priority"] = "HIGH"
+        state["priority_reason"] = "Automated fallback review required."
         state["has_errors"] = True
-        state["fix_suggestion"] = "Failed to parse LLM output."
+        state["issues"] = ["Failed to parse model output"]
+        state["fix_steps"] = ["Review PR diff manually"]
+        state["fix_code"] = ""
+        state["fix_suggestion"] = "Please review the code changes manually."
 
     return state
 
@@ -129,42 +183,49 @@ def route_pr(state: PRState) -> PRState:
 
 def execute_decision(state: PRState) -> PRState:
     print(f"[Agent] Executing decision for PR #{state['pr_number']}")
-    if not state.get("github_token"):
-        print("[Agent] No github token provided, skipping execute.")
-        return state
-
-    g = Github(state["github_token"])
-    repo = g.get_repo(state["repo_full_name"])
-    pr = repo.get_pull(state["pr_number"])
+    pr_id = f"pr:{state['repo_full_name']}:{state['pr_number']}"
     
-    if state["decision"] == "AUTO_MERGE":
+    # NOTE: We DO NOT send automated comments to GitHub!
+    # All analysis, priority, and suggested fixes are stored and displayed only on MergeMind platform.
+    
+    if state["decision"] == "AUTO_MERGE" and state.get("github_token"):
         try:
+            g = Github(state["github_token"])
+            repo = g.get_repo(state["repo_full_name"])
+            pr = repo.get_pull(state["pr_number"])
             pr.merge(commit_message="Auto-merged by MergeMind Agent (Low Priority, No Risks)")
+            status = "MERGED"
             state["status_message"] = "Merged automatically."
-            
-            with neo4j_client.get_session() as session:
-                pr_id = f"pr:{state['repo_full_name']}:{state['pr_number']}"
-                session.run("MATCH (pr:PullRequest {id: $id}) SET pr.status = 'MERGED'", id=pr_id)
         except Exception as e:
-            state["status_message"] = f"Failed to merge: {e}"
+            print(f"[Agent] Auto-merge failed: {e}")
+            status = "READY_TO_MERGE"
+            state["status_message"] = f"Failed to merge automatically: {e}"
     else:
-        comment_body = f"**MergeMind PR Analysis**\n\nPriority: {state['priority']}\nErrors Found: {state['has_errors']}\n\n"
-        if state['has_errors']:
-            comment_body += f"**Suggested Fix:**\n```\n{state['fix_suggestion']}\n```\n"
-        comment_body += "\n*Waiting for Admin approval to merge. Review these suggestions, resolve issues if any, and merge manually.*"
-        
-        pr.create_issue_comment(comment_body)
-        state["status_message"] = "Sent to Admin for approval."
-        
-        with neo4j_client.get_session() as session:
-            pr_id = f"pr:{state['repo_full_name']}:{state['pr_number']}"
-            session.run("""
-                MATCH (pr:PullRequest {id: $id}) 
-                SET pr.agent_priority = $priority,
-                    pr.agent_has_errors = $has_errors,
-                    pr.agent_fix = $fix,
-                    pr.agent_status = 'PENDING_APPROVAL'
-            """, id=pr_id, priority=state["priority"], has_errors=state["has_errors"], fix=state["fix_suggestion"])
+        status = "PENDING_APPROVAL" if state["has_errors"] or state["priority"] == "HIGH" else "READY_TO_MERGE"
+        state["status_message"] = "Analysis complete. Waiting for admin review."
+
+    with neo4j_client.get_session() as session:
+        session.run("""
+            MATCH (pr:PullRequest {id: $id}) 
+            SET pr.agent_priority = $priority,
+                pr.agent_priority_reason = $priority_reason,
+                pr.agent_has_errors = $has_errors,
+                pr.agent_issues = $issues,
+                pr.agent_fix_steps = $fix_steps,
+                pr.agent_fix_code = $fix_code,
+                pr.agent_fix = $fix,
+                pr.agent_status = $status
+        """, 
+            id=pr_id, 
+            priority=state["priority"], 
+            priority_reason=state.get("priority_reason", ""),
+            has_errors=state["has_errors"], 
+            issues=[str(i) for i in state.get("issues", [])],
+            fix_steps=[str(s) for s in state.get("fix_steps", [])],
+            fix_code=str(state.get("fix_code", "")),
+            fix=str(state.get("fix_suggestion", "")),
+            status=status
+        )
 
     return state
 
@@ -196,7 +257,11 @@ def run_agent_for_pr(repo_full_name: str, pr_number: int, github_token: str):
         "rag_context": "",
         "graph_context": "",
         "priority": "",
+        "priority_reason": "",
         "has_errors": False,
+        "issues": [],
+        "fix_steps": [],
+        "fix_code": "",
         "fix_suggestion": "",
         "decision": "",
         "status_message": ""

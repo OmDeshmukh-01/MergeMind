@@ -201,7 +201,10 @@ export default function DashboardHome() {
       <div>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">Active Pull Requests</h2>
-          <button className="text-sm font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400">
+          <button
+            onClick={() => navigate('/dashboard/all-prs')}
+            className="text-sm font-medium text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+          >
             View all
           </button>
         </div>
@@ -225,7 +228,11 @@ export default function DashboardHome() {
                     </td>
                   </tr>
                 ) : activePRs.map((pr) => (
-                  <tr key={pr.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                  <tr
+                    key={pr.id}
+                    onClick={() => navigate(`/dashboard/pr/${pr.id}`)}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                  >
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
@@ -239,11 +246,11 @@ export default function DashboardHome() {
                     </td>
                     <td className="py-4 px-6">
                       <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                        pr.priority === 'High'
+                        pr.priority?.toUpperCase() === 'HIGH'
                           ? 'bg-orange-50 text-orange-700 dark:bg-orange-900/20 dark:text-orange-400'
                           : 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400'
                       }`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${pr.priority === 'High' ? 'bg-orange-500' : 'bg-green-500'}`} />
+                        <div className={`w-1.5 h-1.5 rounded-full ${pr.priority?.toUpperCase() === 'HIGH' ? 'bg-orange-500' : 'bg-green-500'}`} />
                         {pr.priority}
                       </span>
                     </td>
