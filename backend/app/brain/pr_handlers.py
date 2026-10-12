@@ -74,6 +74,14 @@ def _run_incremental_update(repo_full_name: str, pr_number: int, pr_id: str, rep
         stats = process_changed_files(repo_id, changed_files, github_token=github_token)
         print(f"[PR #{pr_number}] Incremental update: {stats}")
 
+        # Kick off the Orchestrator Agent
+        try:
+            from app.agent.orchestrator import run_agent_for_pr
+            print(f"[PR #{pr_number}] Starting Orchestrator Agent...")
+            run_agent_for_pr(repo_full_name, pr_number, github_token)
+        except Exception as agent_e:
+            print(f"[PR #{pr_number}] Orchestrator Agent failed: {agent_e}")
+
     except Exception as e:
         print(f"[PR #{pr_number}] Incremental update failed: {e}")
 

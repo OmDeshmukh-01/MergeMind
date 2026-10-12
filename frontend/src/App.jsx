@@ -8,6 +8,8 @@ import DashboardLayout from './pages/DashboardLayout';
 import DashboardHome from './pages/DashboardHome';
 import AddDocPage from './pages/AddDocPage';
 import ArchitecturePage from './pages/ArchitecturePage';
+import AllPRsPage from './pages/AllPRsPage';
+import PRDetailPage from './pages/PRDetailPage';
 
 /** Redirects unauthenticated users to /login */
 function ProtectedRoute({ children }) {
@@ -71,6 +73,8 @@ export default function App() {
         <Route index element={<DashboardHome />} />
         <Route path="add-doc" element={<AddDocPage />} />
         <Route path="architecture" element={<ArchitecturePage />} />
+        <Route path="all-prs" element={<AllPRsPage />} />
+        <Route path="pr/:prNumber" element={<PRDetailPage />} />
       </Route>
 
       {/* Catch-all → redirect to login */}

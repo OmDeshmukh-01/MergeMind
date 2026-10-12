@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { FilePlus, GitMerge, Layers, LogOut, HelpCircle } from 'lucide-react';
+import { FilePlus, GitMerge, Layers, LogOut, HelpCircle, GitPullRequest } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function DashboardLayout() {
@@ -8,6 +8,7 @@ export default function DashboardLayout() {
 
   const navItems = [
     { name: 'Pull Requests', path: '/dashboard', icon: GitMerge, exact: true },
+    { name: 'All PRs', path: '/dashboard/all-prs', icon: GitPullRequest },
     { name: 'Add Doc', path: '/dashboard/add-doc', icon: FilePlus },
     { name: 'Architecture', path: '/dashboard/architecture', icon: Layers },
   ];

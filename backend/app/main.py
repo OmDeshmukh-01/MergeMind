@@ -5,6 +5,7 @@ import uvicorn
 from app.api.brain import router as brain_router
 from app.api.webhooks import router as webhooks_router
 from app.api.auth import router as auth_router
+from app.api.pull_requests import router as prs_router
 from app.database import engine, Base
 
 # Create all SQLAlchemy tables (users, etc.) on startup if they don't exist
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(brain_router, prefix="/api/brain", tags=["brain"])
 app.include_router(webhooks_router, prefix="/api/webhooks", tags=["webhooks"])
+app.include_router(prs_router, prefix="/api/prs", tags=["prs"])
 
 @app.get("/health")
 async def health_check():
